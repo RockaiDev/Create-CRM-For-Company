@@ -22,6 +22,10 @@ jobs:
         with:
           node-version: 20
 
+      # تثبيت المكتبات المطلوبة
+      - name: Install dependencies
+        run: npm install axios dotenv
+
       - name: Run Provision Script
         env:
           NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
