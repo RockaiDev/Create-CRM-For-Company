@@ -1,168 +1,99 @@
 #!/usr/bin/env node
-/* deploy-company.js
-   Usage: node deploy-company.js <companyShortName>
-*/
 
-const axios = require('axios');
-const { Client } = require('pg');
-const bcrypt = require('bcryptjs');
-require('dotenv').config();
+import axios from "axios";
+import dotenv from "dotenv";
 
-const [, , COMPANY] = process.argv;
-if (!COMPANY) {
-  console.error('Usage: node deploy-company.js <companyShortName>');
+dotenv.config();
+
+const args = process.argv.slice(2);
+
+if (args.length < 2) {
+  console.error("Usage: node deploy-company.js <companyName> <domain>");
   process.exit(1);
 }
 
-// -------- CONFIG --------
-const DOMAIN = `${COMPANY}.propaicrm.com`;
-const ADMIN_EMAIL = `admin@${COMPANY}.com`;
-const ADMIN_PASSWORD = 'Admin@123'; // ❌ غيّرها قبل الإنتاج
-const SALT_ROUNDS = 10;
+const [companyName, domain] = args;
 
-const env = process.env;
-const NEON_API_KEY = env.NEON_API_KEY;
-const RAILWAY_API_KEY = env.RAILWAY_API_KEY;
-const VERCEL_TOKEN = env.VERCEL_TOKEN;
-const NAMECHEAP_USER = env.NAMECHEAP_API_USER;
-const NAMECHEAP_KEY = env.NAMECHEAP_API_KEY;
+const NEON_API_KEY = process.env.NEON_API_KEY;
+const NEON_API_URL = "https://console.neon.tech/api/v2";
 
-const BACKEND_REPO = "https://github.com/RockaiDev/Propai-CRM-back-End";
-const FRONTEND_REPO = "https://github.com/RockaiDev/Propai-CRM-Front-End";
-
-// -------- HELPERS --------
-async function logStep(step, message) {
-  console.log(`[${step}] ${message}`);
+if (!NEON_API_KEY) {
+  console.error("❌ Missing NEON_API_KEY in .env");
+  process.exit(1);
 }
 
-// -------- Neon --------
-async function createNeonDatabase(company) {
-  await logStep('neon-create', `creating Neon DB for ${company}`);
-  const resp = await axios.post('https://console.neon.tech/api/v2/projects', {
-    name: `project-${company}`,
-    region_id: "aws-us-east-1", // اختار الريجن المناسب
-  }, { headers: { Authorization: `Bearer ${NEON_API_KEY}` }});
+const headers = {
+  Authorization: `Bearer ${NEON_API_KEY}`,
+  "Content-Type": "application/json",
+};
 
-  // خد الـ connection string
-  const connection = resp.data?.connection_uris?.[0]?.connection_uri;
-  return connection;
-}
-
-// -------- Railway --------
-async function createRailwayProject(company, dbUrl) {
-  await logStep('railway', 'creating backend project on Railway');
-  const resp = await axios.post(
-    "https://backboard.railway.app/graphql",
-    {
-      query: `
-        mutation {
-          projectCreate(input: { name: "backend-${company}" }) {
-            id
-          }
-        }
-      `
-    },
-    { headers: { Authorization: `Bearer ${RAILWAY_API_KEY}` } }
-  );
-
-  const projectId = resp.data?.data?.projectCreate?.id;
-  if (!projectId) throw new Error("Railway project create failed");
-
-  // set DATABASE_URL
-  await axios.post(
-    `https://backboard.railway.app/project/${projectId}/env`,
-    { key: "DATABASE_URL", value: dbUrl, isSecret: true },
-    { headers: { Authorization: `Bearer ${RAILWAY_API_KEY}` } }
-  );
-
-  return projectId;
-}
-
-// -------- Vercel --------
-async function createVercelProject(company, backendUrl) {
-  await logStep('vercel', 'creating frontend project on Vercel');
-  const resp = await axios.post(
-    "https://api.vercel.com/v9/projects",
-    { name: `frontend-${company}`, gitRepository: { repo: FRONTEND_REPO } },
-    { headers: { Authorization: `Bearer ${VERCEL_TOKEN}` } }
-  );
-
-  const projectId = resp.data?.id;
-  if (!projectId) throw new Error("Vercel project create failed");
-
-  // set env
-  await axios.post(
-    `https://api.vercel.com/v9/projects/${projectId}/env`,
-    { key: "NEXT_PUBLIC_API_URL", value: backendUrl, target: ["production"] },
-    { headers: { Authorization: `Bearer ${VERCEL_TOKEN}` } }
-  );
-
-  return projectId;
-}
-
-// -------- Namecheap --------
-async function createNamecheapRecord(subdomain, value) {
-  await logStep('dns', `creating dns record ${subdomain}`);
-  const params = {
-    ApiUser: NAMECHEAP_USER,
-    ApiKey: NAMECHEAP_KEY,
-    UserName: NAMECHEAP_USER,
-    Command: 'namecheap.domains.dns.setHosts',
-    ClientIp: 'YOUR_SERVER_IP', // ❌ غيّرها
-    SLD: 'propaicrm',
-    TLD: 'com',
-    HostName1: subdomain,
-    RecordType1: 'CNAME',
-    Address1: value,
-    TTL1: 60,
-  };
-  return axios.get('https://api.namecheap.com/xml.response', { params });
-}
-
-// -------- Main Runner --------
-async function run() {
+async function main() {
   try {
-    await logStep('start', `start provisioning for ${COMPANY}`);
+    console.log(`[start] start provisioning for ${companyName}`);
 
-    // 1) Neon DB
-    const neonDbUrl = await createNeonDatabase(COMPANY);
-    await logStep('neon-done', `neon db url: ${neonDbUrl}`);
-
-    // 2) Seed DB
-    const pg = new Client({ connectionString: neonDbUrl });
-    await pg.connect();
-    await pg.query(`
-      CREATE EXTENSION IF NOT EXISTS "pgcrypto";
-      CREATE TABLE IF NOT EXISTS users (
-        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-        email text UNIQUE NOT NULL,
-        password text NOT NULL,
-        role text NOT NULL DEFAULT 'admin',
-        created_at timestamptz DEFAULT now()
-      );
-    `);
-    const hash = await bcrypt.hash(ADMIN_PASSWORD, SALT_ROUNDS);
-    await pg.query(
-      'INSERT INTO users (email, password, role) VALUES ($1,$2,$3) ON CONFLICT (email) DO NOTHING',
-      [ADMIN_EMAIL, hash, 'admin']
+    // 1️⃣ إنشاء Project جديد
+    console.log("[neon-create] creating Neon project...");
+    const projectRes = await axios.post(
+      `${NEON_API_URL}/projects`,
+      {
+        project: {
+          name: `${companyName}-db`,
+          region_id: "aws-eu-central-1", // اختر الريجن المناسب
+          provisioner: "k8s-neonvm",
+        },
+      },
+      { headers }
     );
-    await pg.end();
 
-    // 3) Railway
-    const railwayProjectId = await createRailwayProject(COMPANY, neonDbUrl);
-    const backendUrl = `https://${railwayProjectId}.up.railway.app`;
+    const project = projectRes.data.project;
+    console.log(`✅ Project created: ${project.id}`);
 
-    // 4) Vercel
-    await createVercelProject(COMPANY, backendUrl);
+    // 2️⃣ إنشاء Database
+    console.log("[neon-db] creating database...");
+    const dbRes = await axios.post(
+      `${NEON_API_URL}/projects/${project.id}/databases`,
+      {
+        database: {
+          name: `${companyName}_db`,
+        },
+      },
+      { headers }
+    );
 
-    // 5) DNS
-    await createNamecheapRecord(COMPANY, "cname.vercel-dns.com");
+    const database = dbRes.data.database;
+    console.log(`✅ Database created: ${database.name}`);
 
-    await logStep('done', `Provisioning finished for ${COMPANY} → https://${DOMAIN}`);
+    // 3️⃣ إنشاء User
+    console.log("[neon-user] creating user...");
+    const userRes = await axios.post(
+      `${NEON_API_URL}/projects/${project.id}/roles`,
+      {
+        role: {
+          name: `${companyName}_user`,
+          password: `${Math.random().toString(36).slice(-12)}`,
+        },
+      },
+      { headers }
+    );
+
+    const user = userRes.data.role;
+    console.log(`✅ User created: ${user.name}`);
+
+    // 4️⃣ جلب Connection string
+    console.log("[neon-conn] fetching connection string...");
+    const connRes = await axios.get(
+      `${NEON_API_URL}/projects/${project.id}/connection_uri`,
+      { headers }
+    );
+
+    const connection = connRes.data.connection_uri;
+    console.log(`🎉 Connection string for ${companyName}:`);
+    console.log(connection);
+
   } catch (err) {
-    console.error('Provisioning failed:', err.response?.data || err.message || err);
+    console.error("❌ Provisioning failed:", err.response?.data || err.message);
     process.exit(1);
   }
 }
 
-run();
+main();
