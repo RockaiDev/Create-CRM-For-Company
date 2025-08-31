@@ -34,4 +34,4 @@ jobs:
           NAMECHEAP_API_KEY: ${{ secrets.NAMECHEAP_API_KEY }}
           ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
         run: |
-          node deploy-company.js "${{ github.event.inputs.company }}" "${{ github.event.inputs.domain }}"
+            node deploy-company.js "${{ github.event.inputs.branch }}"
