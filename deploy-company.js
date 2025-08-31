@@ -48,28 +48,19 @@ async function provisionCompany() {
     const projectId = projectRes.data.project.id;
     console.log(`[✅] Neon Project created: ${projectId}`);
 
-    // 2️⃣ Create a database inside the project
-    const dbPayload = {
-      database: {
-        name: `${companyName}_main`,
-        branch: "main"
-      }
-    };
+    // 2️⃣ Get default branch (database) connection string
+    console.log("➡️ Fetching main branch connection string...");
+    const branchesRes = await axios.get(`${NEON_API_URL}/projects/${projectId}/branches`, { headers });
+    const mainBranch = branchesRes.data.branches.find(b => b.name === 'main');
 
-    console.log("➡️ Creating database...");
-    const dbRes = await axios.post(`${NEON_API_URL}/projects/${projectId}/databases`, dbPayload, { headers });
-    const databaseId = dbRes.data.database.id;
-    console.log(`[✅] Database created: ${databaseId}`);
+    if (!mainBranch) throw new Error("❌ Could not find the main branch");
 
-    // 3️⃣ Get connection string
-    console.log("➡️ Fetching connection string...");
-    const connRes = await axios.get(`${NEON_API_URL}/projects/${projectId}/databases/${databaseId}/connection-info`, { headers });
-    const connectionString = connRes.data.connection_info?.uri;
+    const connectionString = mainBranch.connection_info?.uri;
+    if (!connectionString) throw new Error("❌ Failed to get connection string");
 
-    if (!connectionString) throw new Error("❌ Failed to get database connection string");
     console.log(`[🔗] Connection string fetched`);
 
-    // 4️⃣ Create a dedicated DB user
+    // 3️⃣ Create a dedicated DB user
     const dbPassword = generatePassword();
     const userPayload = {
       user: {
@@ -80,14 +71,14 @@ async function provisionCompany() {
 
     console.log("➡️ Creating database user...");
     const userRes = await axios.post(
-      `${NEON_API_URL}/projects/${projectId}/databases/${databaseId}/users`,
+      `${NEON_API_URL}/projects/${projectId}/branches/${mainBranch.id}/users`,
       userPayload,
       { headers }
     );
     const dbUser = userRes.data.user.name;
     console.log(`[✅] Database user created: ${dbUser}`);
 
-    // 5️⃣ Run initial migrations
+    // 4️⃣ Run initial migrations
     console.log("➡️ Running initial migrations...");
     const client = new Client({
       connectionString: connectionString,
@@ -108,11 +99,11 @@ async function provisionCompany() {
     await client.end();
     console.log("[✅] Initial migrations completed");
 
-    // 6️⃣ Output all info
+    // 5️⃣ Output all info
     console.log("\n[🎉 Provisioning Completed]");
     console.log(JSON.stringify({
       projectId,
-      databaseId,
+      branchId: mainBranch.id,
       dbUser,
       dbPassword,
       connectionString
