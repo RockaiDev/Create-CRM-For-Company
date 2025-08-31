@@ -31,16 +31,13 @@ async function main() {
   try {
     console.log(`[start] start provisioning for ${companyName}`);
 
-    // 1️⃣ إنشاء Project جديد
+    // 1️⃣ إنشاء Project
     console.log("[neon-create] creating Neon project...");
     const projectRes = await axios.post(
       `${NEON_API_URL}/projects`,
       {
-        project: {
-          name: `${companyName}-db`,
-          region_id: "aws-eu-central-1", // اختر الريجن المناسب
-          provisioner: "k8s-neonvm",
-        },
+        name: `${companyName}-db`,
+        region_id: "aws-us-east-1", // غيرها حسب الريجن اللي يناسبك
       },
       { headers }
     );
@@ -53,9 +50,7 @@ async function main() {
     const dbRes = await axios.post(
       `${NEON_API_URL}/projects/${project.id}/databases`,
       {
-        database: {
-          name: `${companyName}_db`,
-        },
+        name: `${companyName}_db`,
       },
       { headers }
     );
@@ -65,13 +60,12 @@ async function main() {
 
     // 3️⃣ إنشاء User
     console.log("[neon-user] creating user...");
+    const password = Math.random().toString(36).slice(-12);
     const userRes = await axios.post(
       `${NEON_API_URL}/projects/${project.id}/roles`,
       {
-        role: {
-          name: `${companyName}_user`,
-          password: `${Math.random().toString(36).slice(-12)}`,
-        },
+        name: `${companyName}_user`,
+        password,
       },
       { headers }
     );
