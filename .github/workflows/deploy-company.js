@@ -36,8 +36,10 @@ async function main() {
     const projectRes = await axios.post(
       `${NEON_API_URL}/projects`,
       {
-        name: `${companyName}-db`,
-        region_id: "aws-us-east-1", // غيرها حسب الريجن اللي يناسبك
+        project: {
+          name: `${companyName}-db`,
+          region_id: "aws-us-east-1", // غيرها حسب الريجن اللي يناسبك
+        },
       },
       { headers }
     );
@@ -50,7 +52,7 @@ async function main() {
     const dbRes = await axios.post(
       `${NEON_API_URL}/projects/${project.id}/databases`,
       {
-        name: `${companyName}_db`,
+        database: { name: `${companyName}_db` },
       },
       { headers }
     );
@@ -64,8 +66,10 @@ async function main() {
     const userRes = await axios.post(
       `${NEON_API_URL}/projects/${project.id}/roles`,
       {
-        name: `${companyName}_user`,
-        password,
+        role: {
+          name: `${companyName}_user`,
+          password,
+        },
       },
       { headers }
     );
