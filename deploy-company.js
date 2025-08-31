@@ -30,6 +30,11 @@ function generatePassword(length = 16) {
   return crypto.randomBytes(length).toString('base64').slice(0, length);
 }
 
+// --- Helper: delay ---
+function wait(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 // --- Provision Function ---
 async function provisionCompany() {
   try {
@@ -48,17 +53,28 @@ async function provisionCompany() {
     const projectId = projectRes.data.project.id;
     console.log(`[✅] Neon Project created: ${projectId}`);
 
-    // 2️⃣ Get default branch (database) connection string
+    // 2️⃣ Wait for main branch and fetch connection string
     console.log("➡️ Fetching main branch connection string...");
-    const branchesRes = await axios.get(`${NEON_API_URL}/projects/${projectId}/branches`, { headers });
-    const mainBranch = branchesRes.data.branches.find(b => b.name === 'main');
+    let mainBranch;
+    let connectionString;
+    let retries = 10;
 
-    if (!mainBranch) throw new Error("❌ Could not find the main branch");
+    while (retries > 0) {
+      const branchesRes = await axios.get(`${NEON_API_URL}/projects/${projectId}/branches`, { headers });
+      mainBranch = branchesRes.data.branches.find(b => b.name === 'main');
 
-    const connectionString = mainBranch.connection_info?.uri;
-    if (!connectionString) throw new Error("❌ Failed to get connection string");
+      if (mainBranch?.connection_info?.uri) {
+        connectionString = mainBranch.connection_info.uri;
+        break;
+      }
 
-    console.log(`[🔗] Connection string fetched`);
+      console.log("⏳ Branch not ready yet, retrying in 3s...");
+      await wait(3000);
+      retries--;
+    }
+
+    if (!connectionString) throw new Error("❌ Failed to get connection string after multiple retries");
+    console.log(`[🔗] Connection string fetched: ${connectionString}`);
 
     // 3️⃣ Create a dedicated DB user
     const dbPassword = generatePassword();
