@@ -23,44 +23,54 @@ const headers = {
 
 async function provisionCompany() {
   try {
-    console.log(`[start] start provisioning for ${companyName}`);
+    console.log(`[start] Start provisioning for ${companyName}`);
 
-    // payload
-    const payload = {
+    // 1️⃣ Create Neon Project
+    const projectPayload = {
       project: {
         name: `${companyName}-db`,
         region_id: "aws-us-east-1"
       }
     };
 
-    console.log("➡️ Sending payload:", JSON.stringify(payload, null, 2));
-
-    // Create Neon Project
-    const projectRes = await axios.post(
-      `${NEON_API_URL}/projects`,
-      payload,
-      { headers }
-    );
-
-    console.log("[neon-create] Response status:", projectRes.status);
-    console.log("[neon-create] Response data:", JSON.stringify(projectRes.data, null, 2));
-
+    console.log("➡️ Creating Neon project...");
+    const projectRes = await axios.post(`${NEON_API_URL}/projects`, projectPayload, { headers });
     const projectId = projectRes.data.project.id;
-    console.log(`[✅] Neon Project created with id: ${projectId}`);
+    console.log(`[✅] Neon Project created: ${projectId}`);
 
-    // هنا ممكن نكمل باقي خطوات الربط (DB, migrations, user, إلخ...)
+    // 2️⃣ Create a database inside the project
+    const dbPayload = {
+      database: {
+        name: `${companyName}_main`,
+        branch: "main"
+      }
+    };
+
+    console.log("➡️ Creating database...");
+    const dbRes = await axios.post(`${NEON_API_URL}/projects/${projectId}/databases`, dbPayload, { headers });
+    const databaseId = dbRes.data.database.id;
+    console.log(`[✅] Database created: ${databaseId}`);
+
+    // 3️⃣ Get connection string
+    console.log("➡️ Fetching connection string...");
+    const connRes = await axios.get(`${NEON_API_URL}/projects/${projectId}/databases/${databaseId}/connection-info`, { headers });
+    const connectionString = connRes.data.connection_info?.uri;
+
+    if (!connectionString) {
+      throw new Error("❌ Failed to get database connection string");
+    }
+
+    console.log(`[🔗] Database connection string: ${connectionString}`);
+    console.log(`[✅] Provisioning completed successfully for ${companyName}`);
 
   } catch (err) {
     console.error("❌ Provisioning failed:");
-
     if (err.response) {
       console.error("Status:", err.response.status);
-      console.error("Headers:", err.response.headers);
       console.error("Data:", JSON.stringify(err.response.data, null, 2));
     } else {
       console.error(err.message);
     }
-
     process.exit(1);
   }
 }
