@@ -24,21 +24,22 @@ const headers = {
   "Content-Type": "application/json"
 };
 
-// --- Helper: generate strong password ---
+// --- Helper functions ---
 function generatePassword(length = 16) {
   return crypto.randomBytes(length).toString('base64').slice(0, length);
 }
 
-// --- Helper: delay ---
 function wait(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+// --- Main function ---
 async function provisionCompany() {
   try {
     console.log(`[start] Start provisioning for ${companyName}`);
 
     // 1️⃣ Create Neon Project
+    console.log("➡️ Creating Neon project...");
     const projectPayload = {
       project: {
         name: `${companyName}-db`,
@@ -46,7 +47,6 @@ async function provisionCompany() {
       }
     };
 
-    console.log("➡️ Creating Neon project...");
     const projectRes = await axios.post(`${NEON_API_URL}/projects`, projectPayload, { headers });
     const projectId = projectRes.data.project.id;
     console.log(`[✅] Neon Project created: ${projectId}`);
@@ -54,14 +54,13 @@ async function provisionCompany() {
     // 2️⃣ Wait for main branch to be ready
     console.log("➡️ Waiting for main branch to be ready...");
     let mainBranch;
-    let retries = 50; // ~4 minutes
     let connectionInfo;
-
+    let retries = 60; // ~5 minutes
     while (retries > 0) {
       const branchesRes = await axios.get(`${NEON_API_URL}/projects/${projectId}/branches`, { headers });
       mainBranch = branchesRes.data.branches.find(b => b.name === 'main');
 
-      if (mainBranch?.connection_info?.user && mainBranch?.connection_info?.password && mainBranch?.connection_info?.host) {
+      if (mainBranch?.connection_info?.host) {
         connectionInfo = mainBranch.connection_info;
         break;
       }
@@ -77,7 +76,7 @@ async function provisionCompany() {
     // 3️⃣ Create dedicated DB user
     const dbUser = `${companyName}_user`;
     const dbPassword = generatePassword();
-
+    console.log("➡️ Creating DB user...");
     const userPayload = {
       user: {
         name: dbUser,
@@ -85,22 +84,22 @@ async function provisionCompany() {
       }
     };
 
-    console.log("➡️ Creating DB user...");
     await axios.post(`${NEON_API_URL}/projects/${projectId}/branches/${mainBranch.id}/users`, userPayload, { headers });
     console.log(`[✅] DB user created: ${dbUser}`);
 
     // 4️⃣ Construct connection string using new user
     const connectionString = `postgresql://${dbUser}:${dbPassword}@${connectionInfo.host}:${connectionInfo.port}/${connectionInfo.database}?sslmode=require`;
 
-    // 5️⃣ Output all info
-    console.log("\n[🎉 Provisioning Completed]");
-    console.log(JSON.stringify({
-      projectId,
-      branchId: mainBranch.id,
-      dbUser,
-      dbPassword,
-      connectionString
-    }, null, 2));
+    // 5️⃣ Output ready-to-use .env snippet
+    console.log("\n[🎉 Provisioning Completed!]");
+    console.log(`Copy this into your backend .env file:\n`);
+    console.log(`DATABASE_URL="${connectionString}"`);
+    console.log(`DB_USER="${dbUser}"`);
+    console.log(`DB_PASSWORD="${dbPassword}"`);
+    console.log(`PROJECT_ID="${projectId}"`);
+    console.log(`BRANCH_ID="${mainBranch.id}"\n`);
+
+    console.log("You can now use DATABASE_URL in your backend to connect to Neon.");
 
   } catch (err) {
     console.error("❌ Provisioning failed:");
