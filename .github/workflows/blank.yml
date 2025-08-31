@@ -22,9 +22,8 @@ jobs:
         with:
           node-version: 20
 
-      # تثبيت المكتبات المطلوبة
       - name: Install dependencies
-        run: npm install axios dotenv
+        run: npm install axios dotenv pg bcryptjs
 
       - name: Run Provision Script
         env:
@@ -33,7 +32,6 @@ jobs:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           NAMECHEAP_API_USER: ${{ secrets.NAMECHEAP_API_USER }}
           NAMECHEAP_API_KEY: ${{ secrets.NAMECHEAP_API_KEY }}
-          BACKEND_REPO: ${{ secrets.BACKEND_REPO }}
-          FRONTEND_REPO: ${{ secrets.FRONTEND_REPO }}
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
         run: |
           node deploy-company.js "${{ github.event.inputs.company }}" "${{ github.event.inputs.domain }}"
