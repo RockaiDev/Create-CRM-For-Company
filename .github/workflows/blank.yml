@@ -1,13 +1,10 @@
-name: Provision Company CRM
+name: Provision Neon Branch
 
 on:
   workflow_dispatch:
     inputs:
-      company:
-        description: 'Short name of the company (e.g. rockai)'
-        required: true
-      domain:
-        description: 'Domain of the company (e.g. rockai.dev)'
+      branch:
+        description: 'Name of the branch to create/provision'
         required: true
 
 jobs:
@@ -23,15 +20,10 @@ jobs:
           node-version: 20
 
       - name: Install dependencies
-        run: npm install axios dotenv pg bcryptjs
+        run: npm install axios dotenv
 
-      - name: Run Provision Script
+      - name: Run Deploy Script
         env:
           NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
-          RAILWAY_API_KEY: ${{ secrets.RAILWAY_API_KEY }}
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          NAMECHEAP_API_USER: ${{ secrets.NAMECHEAP_API_USER }}
-          NAMECHEAP_API_KEY: ${{ secrets.NAMECHEAP_API_KEY }}
-          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
         run: |
-            node deploy-company.js "${{ github.event.inputs.branch }}"
+          node deploy-company.js "${{ github.event.inputs.branch }}"
