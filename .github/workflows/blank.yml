@@ -1,0 +1,38 @@
+name: Provision Company CRM
+
+on:
+  workflow_dispatch:
+    inputs:
+      company:
+        description: 'Short name of the company (e.g. rockai)'
+        required: true
+      domain:
+        description: 'Domain of the company (e.g. rockai.dev)'
+        required: true
+
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Provision Script
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          RAILWAY_API_KEY: ${{ secrets.RAILWAY_API_KEY }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          NAMECHEAP_API_USER: ${{ secrets.NAMECHEAP_API_USER }}
+          NAMECHEAP_API_KEY: ${{ secrets.NAMECHEAP_API_KEY }}
+          BACKEND_REPO: ${{ secrets.BACKEND_REPO }}
+          FRONTEND_REPO: ${{ secrets.FRONTEND_REPO }}
+        run: |
+          node deploy-company.js "${{ github.event.inputs.company }}" "${{ github.event.inputs.domain }}"
