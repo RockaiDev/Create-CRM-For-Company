@@ -1,6 +1,5 @@
 import 'dotenv/config';
 import axios from 'axios';
-import { Client } from 'pg';
 import crypto from 'crypto';
 
 // --- Arguments ---
@@ -25,7 +24,7 @@ const headers = {
   "Content-Type": "application/json"
 };
 
-// --- Helper to generate random strong passwords ---
+// --- Helper: generate strong password ---
 function generatePassword(length = 16) {
   return crypto.randomBytes(length).toString('base64').slice(0, length);
 }
@@ -35,7 +34,6 @@ function wait(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-// --- Provision Function ---
 async function provisionCompany() {
   try {
     console.log(`[start] Start provisioning for ${companyName}`);
@@ -53,67 +51,46 @@ async function provisionCompany() {
     const projectId = projectRes.data.project.id;
     console.log(`[✅] Neon Project created: ${projectId}`);
 
-    // 2️⃣ Wait for main branch and fetch connection string
-    console.log("➡️ Fetching main branch connection string...");
+    // 2️⃣ Wait for main branch to be ready
+    console.log("➡️ Waiting for main branch to be ready...");
     let mainBranch;
-    let connectionString;
-    let retries = 10;
+    let retries = 50; // ~4 minutes
+    let connectionInfo;
 
     while (retries > 0) {
       const branchesRes = await axios.get(`${NEON_API_URL}/projects/${projectId}/branches`, { headers });
       mainBranch = branchesRes.data.branches.find(b => b.name === 'main');
 
-      if (mainBranch?.connection_info?.uri) {
-        connectionString = mainBranch.connection_info.uri;
+      if (mainBranch?.connection_info?.user && mainBranch?.connection_info?.password && mainBranch?.connection_info?.host) {
+        connectionInfo = mainBranch.connection_info;
         break;
       }
 
-      console.log("⏳ Branch not ready yet, retrying in 3s...");
-      await wait(3000);
+      console.log(`⏳ Branch not ready yet, retrying in 5s... (${retries} retries left)`);
+      await wait(5000);
       retries--;
     }
 
-    if (!connectionString) throw new Error("❌ Failed to get connection string after multiple retries");
-    console.log(`[🔗] Connection string fetched: ${connectionString}`);
+    if (!connectionInfo) throw new Error("❌ Failed to get connection info after multiple retries");
+    console.log(`[🔗] Main branch is ready`);
 
-    // 3️⃣ Create a dedicated DB user
+    // 3️⃣ Create dedicated DB user
+    const dbUser = `${companyName}_user`;
     const dbPassword = generatePassword();
+
     const userPayload = {
       user: {
-        name: `${companyName}_user`,
+        name: dbUser,
         password: dbPassword
       }
     };
 
-    console.log("➡️ Creating database user...");
-    const userRes = await axios.post(
-      `${NEON_API_URL}/projects/${projectId}/branches/${mainBranch.id}/users`,
-      userPayload,
-      { headers }
-    );
-    const dbUser = userRes.data.user.name;
-    console.log(`[✅] Database user created: ${dbUser}`);
+    console.log("➡️ Creating DB user...");
+    await axios.post(`${NEON_API_URL}/projects/${projectId}/branches/${mainBranch.id}/users`, userPayload, { headers });
+    console.log(`[✅] DB user created: ${dbUser}`);
 
-    // 4️⃣ Run initial migrations
-    console.log("➡️ Running initial migrations...");
-    const client = new Client({
-      connectionString: connectionString,
-      ssl: { rejectUnauthorized: false }
-    });
-
-    await client.connect();
-
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS users (
-        id SERIAL PRIMARY KEY,
-        name VARCHAR(100),
-        email VARCHAR(100) UNIQUE,
-        password VARCHAR(255)
-      );
-    `);
-
-    await client.end();
-    console.log("[✅] Initial migrations completed");
+    // 4️⃣ Construct connection string using new user
+    const connectionString = `postgresql://${dbUser}:${dbPassword}@${connectionInfo.host}:${connectionInfo.port}/${connectionInfo.database}?sslmode=require`;
 
     // 5️⃣ Output all info
     console.log("\n[🎉 Provisioning Completed]");
