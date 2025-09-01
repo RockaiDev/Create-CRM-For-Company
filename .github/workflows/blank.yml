@@ -96,9 +96,8 @@ jobs:
           echo "cloudinary_json=$(cat work/logo_upload.json | jq -c '.')" >> $GITHUB_OUTPUT
           echo "logo_url=$(cat work/logo_upload.json | jq -r '.secure_url')" >> $GITHUB_OUTPUT
 
-      - name: Clone FRONTEND repo
-        run: |
-          git clone --depth=1 "$FRONTEND_REPO" work/frontend
+      - name: Clone frontend
+        run: git clone --depth=1 https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/RockaiDev/Propai-CRM-Front-End work/frontend
 
       - name: Deploy FRONTEND to Vercel (with envs)
         id: vercel
@@ -116,9 +115,8 @@ jobs:
           echo "frontend_url=$(cat work/vercel.json | jq -r '.url')" >> $GITHUB_OUTPUT
           echo "frontend_host=$(cat work/vercel.json | jq -r '.host')" >> $GITHUB_OUTPUT
 
-      - name: Clone BACKEND repo
-        run: |
-          git clone --depth=1 "$BACKEND_REPO" work/backend
+      - name: Clone backend
+        run: git clone --depth=1 https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/RockaiDev/Propai-CRM-Back-End work/backend
 
       - name: Deploy BACKEND to Railway (with envs)
         id: railway
