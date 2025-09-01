@@ -1,29 +1,174 @@
-name: Provision Neon Branch
+name: Zero-touch CRM Provisioning
 
 on:
   workflow_dispatch:
     inputs:
-      branch:
-        description: 'Name of the branch to create/provision'
+      company_name:
+        description: "Company name"
         required: true
+        type: string
+      domain_prefix:
+        description: "Subdomain prefix (e.g., 'acme' -> acme.propaicrm.com)"
+        required: true
+        type: string
+      logo_url:
+        description: "Public URL to the logo image (PNG/JPG/SVG)"
+        required: true
+        type: string
+      company_email:
+        description: "Public company email"
+        required: true
+        type: string
+      company_phone:
+        description: "Public company phone"
+        required: true
+        type: string
+      company_location:
+        description: "City, Country (or full address)"
+        required: true
+        type: string
+      backend_cors_origin:
+        description: "Frontend origin for CORS (leave blank to auto-fill after Vercel deploy)"
+        required: false
+        type: string
+        default: ""
+      backend_env_frontend_url_override:
+        description: "Override FRONTEND_URL env sent to backend (optional)"
+        required: false
+        type: string
+        default: ""
+      neon_db_url:
+        description: "Postgres connection string from Neon (postgres://...)"
+        required: true
+        type: string
+      cloudinary_folder:
+        description: "Cloudinary folder to store logo (e.g., 'logos')"
+        required: false
+        type: string
+        default: "logos"
 
 jobs:
   provision:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+
+    env:
+      FRONTEND_REPO: https://github.com/RockaiDev/Propai-CRM-Front-End
+      BACKEND_REPO: https://github.com/RockaiDev/Propai-CRM-Back-End
+      ROOT_DOMAIN: propaicrm.com
+      VERCEL_SCOPE: ${{ secrets.VERCEL_SCOPE }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      CLOUDINARY_CLOUD_NAME: ${{ secrets.CLOUDINARY_CLOUD_NAME }}
+      CLOUDINARY_API_KEY: ${{ secrets.CLOUDINARY_API_KEY }}
+      CLOUDINARY_API_SECRET: ${{ secrets.CLOUDINARY_API_SECRET }}
+      CLOUDINARY_UPLOAD_PRESET: ${{ secrets.CLOUDINARY_UPLOAD_PRESET }}
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      NAMECHEAP_API_USER: ${{ secrets.NAMECHEAP_API_USER }}
+      NAMECHEAP_API_KEY: ${{ secrets.NAMECHEAP_API_KEY }}
+      NAMECHEAP_USERNAME: ${{ secrets.NAMECHEAP_USERNAME }}
+      NAMECHEAP_CLIENT_IP: ${{ secrets.NAMECHEAP_CLIENT_IP }}
+
     steps:
-      - name: Checkout repository
+      - name: Checkout orchestrator repo
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Install dependencies
-        run: npm install axios dotenv
-
-      - name: Run Deploy Script
-        env:
-          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+      - name: Install tooling
         run: |
-          node deploy-company.js "${{ github.event.inputs.branch }}"
+          sudo apt-get update
+          sudo apt-get install -y jq curl coreutils
+          npm i -g vercel @railway/cli
+
+      - name: Prepare workspace
+        run: |
+          mkdir -p work
+          echo "${{ github.event.inputs.company_name }}" > work/company_name.txt
+
+      - name: Upload logo to Cloudinary
+        id: logo
+        run: |
+          bash scripts/upload_logo.sh \
+            "${{ github.event.inputs.logo_url }}" \
+            "${{ github.event.inputs.cloudinary_folder }}" \
+            > work/logo_upload.json
+
+          echo "cloudinary_json=$(cat work/logo_upload.json | jq -c '.')" >> $GITHUB_OUTPUT
+          echo "logo_url=$(cat work/logo_upload.json | jq -r '.secure_url')" >> $GITHUB_OUTPUT
+
+      - name: Clone FRONTEND repo
+        run: |
+          git clone --depth=1 "$FRONTEND_REPO" work/frontend
+
+      - name: Deploy FRONTEND to Vercel (with envs)
+        id: vercel
+        env:
+          COMPANY_NAME: ${{ github.event.inputs.company_name }}
+          COMPANY_EMAIL: ${{ github.event.inputs.company_email }}
+          COMPANY_PHONE: ${{ github.event.inputs.company_phone }}
+          COMPANY_LOCATION: ${{ github.event.inputs.company_location }}
+          COMPANY_LOGO_URL: ${{ steps.logo.outputs.logo_url }}
+          DOMAIN_PREFIX: ${{ github.event.inputs.domain_prefix }}
+          ROOT_DOMAIN: ${{ env.ROOT_DOMAIN }}
+        run: |
+          bash scripts/deploy_frontend_vercel.sh work/frontend > work/vercel.json
+          echo "vercel_deploy=$(cat work/vercel.json | jq -c '.')" >> $GITHUB_OUTPUT
+          echo "frontend_url=$(cat work/vercel.json | jq -r '.url')" >> $GITHUB_OUTPUT
+          echo "frontend_host=$(cat work/vercel.json | jq -r '.host')" >> $GITHUB_OUTPUT
+
+      - name: Clone BACKEND repo
+        run: |
+          git clone --depth=1 "$BACKEND_REPO" work/backend
+
+      - name: Deploy BACKEND to Railway (with envs)
+        id: railway
+        env:
+          COMPANY_NAME: ${{ github.event.inputs.company_name }}
+          FRONTEND_URL: ${{ github.event.inputs.backend_env_frontend_url_override != '' && github.event.inputs.backend_env_frontend_url_override || steps.vercel.outputs.frontend_url }}
+          CORS_ORIGIN: ${{ github.event.inputs.backend_cors_origin != '' && github.event.inputs.backend_cors_origin || steps.vercel.outputs.frontend_url }}
+          DB_URL: ${{ github.event.inputs.neon_db_url }}
+          CLOUDINARY_CLOUD_NAME: ${{ secrets.CLOUDINARY_CLOUD_NAME }}
+          CLOUDINARY_API_KEY: ${{ secrets.CLOUDINARY_API_KEY }}
+          CLOUDINARY_API_SECRET: ${{ secrets.CLOUDINARY_API_SECRET }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
+        run: |
+          bash scripts/deploy_backend_railway.sh work/backend > work/railway.json
+          echo "railway_json=$(cat work/railway.json | jq -c '.')" >> $GITHUB_OUTPUT
+          echo "backend_url=$(cat work/railway.json | jq -r '.url')" >> $GITHUB_OUTPUT
+
+      - name: Configure DNS on Namecheap for subdomain → Vercel
+        id: dns
+        env:
+          SUBDOMAIN: ${{ github.event.inputs.domain_prefix }}
+          DOMAIN: ${{ env.ROOT_DOMAIN }}
+          VERCEL_HOST: ${{ steps.vercel.outputs.frontend_host }}
+        run: |
+          bash scripts/configure_dns_namecheap.sh \
+            "$SUBDOMAIN" "$DOMAIN" "$VERCEL_HOST" > work/dns.json
+          echo "dns_json=$(cat work/dns.json | jq -c '.')" >> $GITHUB_OUTPUT
+
+      - name: Verify deployment (frontend + backend)
+        id: verify
+        env:
+          FRONTEND_URL: https://${{ github.event.inputs.domain_prefix }}.${{ env.ROOT_DOMAIN }}
+          BACKEND_URL: ${{ steps.railway.outputs.backend_url }}
+        run: |
+          bash scripts/verify.sh \
+            "$FRONTEND_URL" \
+            "$BACKEND_URL" > work/verify.json
+          echo "verify_json=$(cat work/verify.json | jq -c '.')" >> $GITHUB_OUTPUT
+
+      - name: Summary
+        run: |
+          echo "### ✅ Provisioned CRM" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Company**: ${{ github.event.inputs.company_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Frontend**: https://${{ github.event.inputs.domain_prefix }}.${{ env.ROOT_DOMAIN }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Backend (Railway)**: ${{ steps.railway.outputs.backend_url }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Logo**: ${{ steps.logo.outputs.logo_url }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Verification details:" >> $GITHUB_STEP_SUMMARY
+          cat work/verify.json >> $GITHUB_STEP_SUMMARY
