@@ -55,8 +55,8 @@ jobs:
       actions: read
 
     env:
-      FRONTEND_REPO: github.com/RockaiDev/Propai-CRM-Front-End.git
-      BACKEND_REPO: github.com/RockaiDev/Propai-CRM-Back-End.git
+      FRONTEND_REPO: RockaiDev/Propai-CRM-Front-End
+      BACKEND_REPO: RockaiDev/Propai-CRM-Back-End
       ROOT_DOMAIN: propaicrm.com
       VERCEL_SCOPE: ${{ secrets.VERCEL_SCOPE }}
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
@@ -97,7 +97,8 @@ jobs:
           echo "logo_url=$(cat work/logo_upload.json | jq -r '.secure_url')" >> $GITHUB_OUTPUT
 
       - name: Clone frontend
-        run: git clone --depth=1 https://x-access-token:${{ secrets.GITHUB_TOKEN }}@${{ env.FRONTEND_REPO }} work/frontend
+        run: |
+          git clone --depth=1 https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ env.FRONTEND_REPO }} work/frontend
 
       - name: Deploy FRONTEND to Vercel (with envs)
         id: vercel
@@ -116,7 +117,8 @@ jobs:
           echo "frontend_host=$(cat work/vercel.json | jq -r '.host')" >> $GITHUB_OUTPUT
 
       - name: Clone backend
-        run: git clone --depth=1 https://x-access-token:${{ secrets.GITHUB_TOKEN }}@${{ env.BACKEND_REPO }} work/backend
+        run: |
+          git clone --depth=1 https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ env.BACKEND_REPO }} work/backend
 
       - name: Deploy BACKEND to Railway (with envs)
         id: railway
