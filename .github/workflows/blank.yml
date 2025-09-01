@@ -51,7 +51,7 @@ jobs:
   provision:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       actions: read
 
     env:
