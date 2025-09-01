@@ -11,14 +11,17 @@ on:
         description: "Subdomain prefix (e.g., 'acme' -> acme.propaicrm.com)"
         required: true
         type: string
+        pattern: '^[a-z0-9-]+$'
       logo_url:
         description: "Public URL to the logo image (PNG/JPG/SVG)"
         required: true
         type: string
+        pattern: '^https?://.+\.(png|jpg|jpeg|svg)$'
       company_email:
         description: "Public company email"
         required: true
         type: string
+        pattern: '^[^@]+@[^@]+\.[^@]+$'
       company_phone:
         description: "Public company phone"
         required: true
@@ -41,23 +44,30 @@ on:
         description: "Postgres connection string from Neon (postgres://...)"
         required: true
         type: string
+        pattern: '^postgres://.+$'
       cloudinary_folder:
         description: "Cloudinary folder to store logo (e.g., 'logos')"
         required: false
         type: string
         default: "logos"
+        pattern: '^[a-zA-Z0-9_-]+$'
+
+env:
+  FRONTEND_REPO: github.com/RockaiDev/Propai-CRM-Front-End.git
+  BACKEND_REPO: github.com/RockaiDev/Propai-CRM-Back-End.git
+  ROOT_DOMAIN: propaicrm.com
+  WORKSPACE_DIR: work
+  TIMEOUT_MINUTES: 30
 
 jobs:
   provision:
     runs-on: ubuntu-latest
+    timeout-minutes: ${{ env.TIMEOUT_MINUTES }}
     permissions:
       contents: write
       actions: read
 
     env:
-      FRONTEND_REPO: https://github.com/RockaiDev/Propai-CRM-Front-End.git
-      BACKEND_REPO: https://github.com/RockaiDev/Propai-CRM-Back-End.git
-      ROOT_DOMAIN: propaicrm.com
       VERCEL_SCOPE: ${{ secrets.VERCEL_SCOPE }}
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       CLOUDINARY_CLOUD_NAME: ${{ secrets.CLOUDINARY_CLOUD_NAME }}
@@ -73,31 +83,54 @@ jobs:
     steps:
       - name: Checkout orchestrator repo
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
 
       - name: Install tooling
         run: |
           sudo apt-get update
           sudo apt-get install -y jq curl coreutils
           npm i -g vercel @railway/cli
+        timeout-minutes: 10
 
       - name: Prepare workspace
         run: |
-          mkdir -p work
-          echo "${{ github.event.inputs.company_name }}" > work/company_name.txt
+          mkdir -p ${{ env.WORKSPACE_DIR }}
+          echo "${{ github.event.inputs.company_name }}" > ${{ env.WORKSPACE_DIR }}/company_name.txt
+          echo "Provisioning started at: $(date)" > ${{ env.WORKSPACE_DIR }}/provision.log
 
       - name: Upload logo to Cloudinary
         id: logo
         run: |
+          echo "📤 Uploading logo to Cloudinary..." | tee -a ${{ env.WORKSPACE_DIR }}/provision.log
+          
           bash scripts/upload_logo.sh \
             "${{ github.event.inputs.logo_url }}" \
             "${{ github.event.inputs.cloudinary_folder }}" \
-            > work/logo_upload.json
+            > ${{ env.WORKSPACE_DIR }}/logo_upload.json 2>&1
 
-          echo "cloudinary_json=$(cat work/logo_upload.json | jq -c '.')" >> $GITHUB_OUTPUT
-          echo "logo_url=$(cat work/logo_upload.json | jq -r '.secure_url')" >> $GITHUB_OUTPUT
+          if [ $? -ne 0 ]; then
+            echo "❌ Logo upload failed"
+            cat ${{ env.WORKSPACE_DIR }}/logo_upload.json
+            exit 1
+          fi
+
+          echo "cloudinary_json=$(cat ${{ env.WORKSPACE_DIR }}/logo_upload.json | jq -c '.')" >> $GITHUB_OUTPUT
+          echo "logo_url=$(cat ${{ env.WORKSPACE_DIR }}/logo_upload.json | jq -r '.secure_url')" >> $GITHUB_OUTPUT
+          echo "✅ Logo uploaded successfully" | tee -a ${{ env.WORKSPACE_DIR }}/provision.log
+        timeout-minutes: 5
 
       - name: Clone frontend
-        run: git clone --depth=1 https://x-access-token:${{ secrets.GITHUB_TOKEN }}@${{ env.FRONTEND_REPO }} work/frontend
+        run: |
+          echo "📥 Cloning frontend repository..." | tee -a ${{ env.WORKSPACE_DIR }}/provision.log
+          git clone --depth=1 https://x-access-token:${{ secrets.GITHUB_TOKEN }}@${{ env.FRONTEND_REPO }} ${{ env.WORKSPACE_DIR }}/frontend
+        timeout-minutes: 5
 
       - name: Deploy FRONTEND to Vercel (with envs)
         id: vercel
@@ -110,13 +143,27 @@ jobs:
           DOMAIN_PREFIX: ${{ github.event.inputs.domain_prefix }}
           ROOT_DOMAIN: ${{ env.ROOT_DOMAIN }}
         run: |
-          bash scripts/deploy_frontend_vercel.sh work/frontend > work/vercel.json
-          echo "vercel_deploy=$(cat work/vercel.json | jq -c '.')" >> $GITHUB_OUTPUT
-          echo "frontend_url=$(cat work/vercel.json | jq -r '.url')" >> $GITHUB_OUTPUT
-          echo "frontend_host=$(cat work/vercel.json | jq -r '.host')" >> $GITHUB_OUTPUT
+          echo "🚀 Deploying frontend to Vercel..." | tee -a ${{ env.WORKSPACE_DIR }}/provision.log
+          
+          bash scripts/deploy_frontend_vercel.sh ${{ env.WORKSPACE_DIR }}/frontend > ${{ env.WORKSPACE_DIR }}/vercel.json 2>&1
+
+          if [ $? -ne 0 ]; then
+            echo "❌ Frontend deployment failed"
+            cat ${{ env.WORKSPACE_DIR }}/vercel.json
+            exit 1
+          fi
+
+          echo "vercel_deploy=$(cat ${{ env.WORKSPACE_DIR }}/vercel.json | jq -c '.')" >> $GITHUB_OUTPUT
+          echo "frontend_url=$(cat ${{ env.WORKSPACE_DIR }}/vercel.json | jq -r '.url')" >> $GITHUB_OUTPUT
+          echo "frontend_host=$(cat ${{ env.WORKSPACE_DIR }}/vercel.json | jq -r '.host')" >> $GITHUB_OUTPUT
+          echo "✅ Frontend deployed successfully" | tee -a ${{ env.WORKSPACE_DIR }}/provision.log
+        timeout-minutes: 15
 
       - name: Clone backend
-        run: git clone --depth=1 https://x-access-token:${{ secrets.GITHUB_TOKEN }}@${{ env.BACKEND_REPO }} work/backend
+        run: |
+          echo "📥 Cloning backend repository..." | tee -a ${{ env.WORKSPACE_DIR }}/provision.log
+          git clone --depth=1 https://x-access-token:${{ secrets.GITHUB_TOKEN }}@${{ env.BACKEND_REPO }} ${{ env.WORKSPACE_DIR }}/backend
+        timeout-minutes: 5
 
       - name: Deploy BACKEND to Railway (with envs)
         id: railway
@@ -133,9 +180,20 @@ jobs:
           SMTP_PASS: ${{ secrets.SMTP_PASS }}
           SMTP_FROM: ${{ secrets.SMTP_FROM }}
         run: |
-          bash scripts/deploy_backend_railway.sh work/backend > work/railway.json
-          echo "railway_json=$(cat work/railway.json | jq -c '.')" >> $GITHUB_OUTPUT
-          echo "backend_url=$(cat work/railway.json | jq -r '.url')" >> $GITHUB_OUTPUT
+          echo "🚀 Deploying backend to Railway..." | tee -a ${{ env.WORKSPACE_DIR }}/provision.log
+          
+          bash scripts/deploy_backend_railway.sh ${{ env.WORKSPACE_DIR }}/backend > ${{ env.WORKSPACE_DIR }}/railway.json 2>&1
+
+          if [ $? -ne 0 ]; then
+            echo "❌ Backend deployment failed"
+            cat ${{ env.WORKSPACE_DIR }}/railway.json
+            exit 1
+          fi
+
+          echo "railway_json=$(cat ${{ env.WORKSPACE_DIR }}/railway.json | jq -c '.')" >> $GITHUB_OUTPUT
+          echo "backend_url=$(cat ${{ env.WORKSPACE_DIR }}/railway.json | jq -r '.url')" >> $GITHUB_OUTPUT
+          echo "✅ Backend deployed successfully" | tee -a ${{ env.WORKSPACE_DIR }}/provision.log
+        timeout-minutes: 15
 
       - name: Configure DNS on Namecheap for subdomain → Vercel
         id: dns
@@ -144,9 +202,26 @@ jobs:
           DOMAIN: ${{ env.ROOT_DOMAIN }}
           VERCEL_HOST: ${{ steps.vercel.outputs.frontend_host }}
         run: |
+          echo "🌐 Configuring DNS..." | tee -a ${{ env.WORKSPACE_DIR }}/provision.log
+          
           bash scripts/configure_dns_namecheap.sh \
-            "$SUBDOMAIN" "$DOMAIN" "$VERCEL_HOST" > work/dns.json
-          echo "dns_json=$(cat work/dns.json | jq -c '.')" >> $GITHUB_OUTPUT
+            "$SUBDOMAIN" "$DOMAIN" "$VERCEL_HOST" > ${{ env.WORKSPACE_DIR }}/dns.json 2>&1
+
+          if [ $? -ne 0 ]; then
+            echo "❌ DNS configuration failed"
+            cat ${{ env.WORKSPACE_DIR }}/dns.json
+            exit 1
+          fi
+
+          echo "dns_json=$(cat ${{ env.WORKSPACE_DIR }}/dns.json | jq -c '.')" >> $GITHUB_OUTPUT
+          echo "✅ DNS configured successfully" | tee -a ${{ env.WORKSPACE_DIR }}/provision.log
+        timeout-minutes: 10
+
+      - name: Wait for DNS propagation
+        run: |
+          echo "⏳ Waiting for DNS propagation..." | tee -a ${{ env.WORKSPACE_DIR }}/provision.log
+          sleep 30
+          echo "✅ DNS propagation wait completed" | tee -a ${{ env.WORKSPACE_DIR }}/provision.log
 
       - name: Verify deployment (frontend + backend)
         id: verify
@@ -154,19 +229,96 @@ jobs:
           FRONTEND_URL: https://${{ github.event.inputs.domain_prefix }}.${{ env.ROOT_DOMAIN }}
           BACKEND_URL: ${{ steps.railway.outputs.backend_url }}
         run: |
-          bash scripts/verify.sh \
-            "$FRONTEND_URL" \
-            "$BACKEND_URL" > work/verify.json
-          echo "verify_json=$(cat work/verify.json | jq -c '.')" >> $GITHUB_OUTPUT
+          echo "🔍 Verifying deployment..." | tee -a ${{ env.WORKSPACE_DIR }}/provision.log
+          
+          # Retry verification up to 3 times
+          for i in {1..3}; do
+            echo "Attempt $i of 3..." | tee -a ${{ env.WORKSPACE_DIR }}/provision.log
+            
+            bash scripts/verify.sh \
+              "$FRONTEND_URL" \
+              "$BACKEND_URL" > ${{ env.WORKSPACE_DIR }}/verify.json 2>&1
+
+            if [ $? -eq 0 ]; then
+              echo "✅ Verification successful on attempt $i" | tee -a ${{ env.WORKSPACE_DIR }}/provision.log
+              break
+            else
+              echo "⚠️ Verification failed on attempt $i" | tee -a ${{ env.WORKSPACE_DIR }}/provision.log
+              if [ $i -eq 3 ]; then
+                echo "❌ All verification attempts failed"
+                cat ${{ env.WORKSPACE_DIR }}/verify.json
+                exit 1
+              fi
+              sleep 30
+            fi
+          done
+
+          echo "verify_json=$(cat ${{ env.WORKSPACE_DIR }}/verify.json | jq -c '.')" >> $GITHUB_OUTPUT
+        timeout-minutes: 10
+
+      - name: Generate deployment summary
+        run: |
+          echo "📋 Generating deployment summary..." | tee -a ${{ env.WORKSPACE_DIR }}/provision.log
+          
+          cat > ${{ env.WORKSPACE_DIR }}/summary.md << EOF
+          # 🎉 CRM Provisioning Complete
+
+          ## Company Information
+          - **Name**: ${{ github.event.inputs.company_name }}
+          - **Email**: ${{ github.event.inputs.company_email }}
+          - **Phone**: ${{ github.event.inputs.company_phone }}
+          - **Location**: ${{ github.event.inputs.company_location }}
+
+          ## Deployment URLs
+          - **Frontend**: https://${{ github.event.inputs.domain_prefix }}.${{ env.ROOT_DOMAIN }}
+          - **Backend**: ${{ steps.railway.outputs.backend_url }}
+          - **Logo**: ${{ steps.logo.outputs.logo_url }}
+
+          ## Verification Results
+          \`\`\`json
+          $(cat ${{ env.WORKSPACE_DIR }}/verify.json | jq '.')
+          \`\`\`
+
+          ## Provisioning Log
+          \`\`\`
+          $(cat ${{ env.WORKSPACE_DIR }}/provision.log)
+          \`\`\`
+
+          **Provisioned at**: $(date)
+          EOF
 
       - name: Summary
         run: |
-          echo "### ✅ Provisioned CRM" >> $GITHUB_STEP_SUMMARY
+          echo "### ✅ CRM Provisioning Complete" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Company**: ${{ github.event.inputs.company_name }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Frontend**: https://${{ github.event.inputs.domain_prefix }}.${{ env.ROOT_DOMAIN }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Backend (Railway)**: ${{ steps.railway.outputs.backend_url }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Logo**: ${{ steps.logo.outputs.logo_url }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Company**: ${{ github.event.inputs.company_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Frontend**: https://${{ github.event.inputs.domain_prefix }}.${{ env.ROOT_DOMAIN }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Backend**: ${{ steps.railway.outputs.backend_url }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Logo**: ${{ steps.logo.outputs.logo_url }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Verification details:" >> $GITHUB_STEP_SUMMARY
-          cat work/verify.json >> $GITHUB_STEP_SUMMARY
+          echo "**Verification Status**: ✅ All checks passed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "📋 [View detailed summary](${{ env.WORKSPACE_DIR }}/summary.md)" >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: crm-provisioning-artifacts-${{ github.event.inputs.domain_prefix }}
+          path: ${{ env.WORKSPACE_DIR }}/
+          retention-days: 30
+
+  notify-failure:
+    needs: provision
+    if: failure()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Notify failure
+        run: |
+          echo "❌ CRM provisioning failed for company: ${{ github.event.inputs.company_name }}"
+          echo "Domain prefix: ${{ github.event.inputs.domain_prefix }}"
+          echo "Please check the workflow logs for details."
+          echo ""
+          echo "**Failed at**: $(date)"
+          echo "**Workflow run**: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
