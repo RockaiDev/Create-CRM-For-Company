@@ -98,30 +98,10 @@ jobs:
 
       - name: Clone frontend repository
         run: |
-          # Try multiple authentication methods
-          echo "Attempting to clone frontend repository..."
-          
-          # Method 1: Using GITHUB_TOKEN with explicit token
-          if git clone --depth=1 https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ env.FRONTEND_REPO }}.git work/frontend; then
-            echo "Successfully cloned using GITHUB_TOKEN"
-          # Method 2: Using Personal Access Token if available
-          elif [ -n "${{ secrets.PERSONAL_ACCESS_TOKEN }}" ]; then
-            git clone --depth=1 https://x-access-token:${{ secrets.PERSONAL_ACCESS_TOKEN }}@github.com/${{ env.FRONTEND_REPO }}.git work/frontend
-            echo "Successfully cloned using PERSONAL_ACCESS_TOKEN"
-          # Method 3: Using SSH if available
-          elif [ -n "${{ secrets.SSH_PRIVATE_KEY }}" ]; then
-            mkdir -p ~/.ssh
-            echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
-            chmod 600 ~/.ssh/id_rsa
-            ssh-keyscan github.com >> ~/.ssh/known_hosts
-            git clone --depth=1 git@github.com:${{ env.FRONTEND_REPO }}.git work/frontend
-            echo "Successfully cloned using SSH"
-          else
-            echo "All cloning methods failed. Repository might be private or not exist."
-            exit 1
-          fi
+          echo "Cloning frontend repository: ${{ env.FRONTEND_REPO }}"
+          git clone --depth=1 https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ env.FRONTEND_REPO }}.git work/frontend
 
-      - name: Deploy FRONTEND to Vercel (with envs)
+      - name: Deploy FRONTEND to Vercel
         id: vercel
         env:
           COMPANY_NAME: ${{ github.event.inputs.company_name }}
@@ -139,30 +119,10 @@ jobs:
 
       - name: Clone backend repository
         run: |
-          # Try multiple authentication methods
-          echo "Attempting to clone backend repository..."
-          
-          # Method 1: Using GITHUB_TOKEN with explicit token
-          if git clone --depth=1 https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ env.BACKEND_REPO }}.git work/backend; then
-            echo "Successfully cloned using GITHUB_TOKEN"
-          # Method 2: Using Personal Access Token if available
-          elif [ -n "${{ secrets.PERSONAL_ACCESS_TOKEN }}" ]; then
-            git clone --depth=1 https://x-access-token:${{ secrets.PERSONAL_ACCESS_TOKEN }}@github.com/${{ secrets.BACKEND_REPO }}.git work/backend
-            echo "Successfully cloned using PERSONAL_ACCESS_TOKEN"
-          # Method 3: Using SSH if available
-          elif [ -n "${{ secrets.SSH_PRIVATE_KEY }}" ]; then
-            mkdir -p ~/.ssh
-            echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
-            chmod 600 ~/.ssh/id_rsa
-            ssh-keyscan github.com >> ~/.ssh/known_hosts
-            git clone --depth=1 git@github.com:${{ env.BACKEND_REPO }}.git work/backend
-            echo "Successfully cloned using SSH"
-          else
-            echo "All cloning methods failed. Repository might be private or not exist."
-            exit 1
-          fi
+          echo "Cloning backend repository: ${{ env.BACKEND_REPO }}"
+          git clone --depth=1 https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ env.BACKEND_REPO }}.git work/backend
 
-      - name: Deploy BACKEND to Railway (with envs)
+      - name: Deploy BACKEND to Railway
         id: railway
         env:
           COMPANY_NAME: ${{ github.event.inputs.company_name }}
